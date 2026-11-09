@@ -337,6 +337,7 @@
       <span id="tiltVal">Tilt 0° / 0°</span>
       <span class="spacer"></span>
       <span id="objCount">0 objects</span>
+      <span id="cacheStatus" title="Your board is cached in this browser on this device, so it comes back after a reload">Local save on</span>
       <span class="shortcuts-hint">
         <span class="kbd">B</span> pen · <span class="kbd">E</span> eraser · <span class="kbd">Ctrl Z</span> undo · <span class="kbd">Space</span>+drag pan · scroll to zoom
       </span>
@@ -375,6 +376,81 @@
         var rafPending = false;
 
         var INK_FONT = '"Segoe Print","Bradley Hand","Comic Sans MS",cursive';
+
+        /* ---------------- Local cache (localStorage) ----------------
+           The current board is cached in this browser so it survives a
+           reload or the tab being closed. It lives only on this device —
+           clearing the board overwrites the cache with an empty board. */
+        var CACHE_KEY = "darkboard.board.v1";
+        var cacheStatusEl = document.getElementById("cacheStatus");
+        var saveTimer = null;
+        var restoredAt = null;
+
+        function setCacheStatus(text) {
+          if (cacheStatusEl) cacheStatusEl.textContent = text;
+        }
+        function cleanObjects(list) {
+          // Committed objects briefly carry a transient `before` snapshot
+          // for undo — never write that into the cache.
+          return (list || []).map(function (o) {
+            var c = {};
+            for (var k in o) { if (k !== "before") c[k] = o[k]; }
+            return c;
+          });
+        }
+        function saveCache() {
+          saveTimer = null;
+          try {
+            var payload = {
+              v: 1,
+              savedAt: Date.now(),
+              objects: cleanObjects(state.objects),
+              cam: { x: state.cam.x, y: state.cam.y, zoom: state.cam.zoom },
+              boardDark: state.boardDark,
+              grid: state.grid
+            };
+            localStorage.setItem(CACHE_KEY, JSON.stringify(payload));
+            var t = new Date(payload.savedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+            setCacheStatus("Saved locally · " + t);
+          } catch (err) {
+            // Storage full, blocked, or unavailable (e.g. private browsing)
+            setCacheStatus("Local save unavailable in this browser");
+          }
+        }
+        function scheduleSaveCache() {
+          if (saveTimer) clearTimeout(saveTimer);
+          saveTimer = setTimeout(saveCache, 250);
+        }
+        // Flush a pending save if the page is hidden or closed mid-debounce
+        document.addEventListener("visibilitychange", function () {
+          if (document.visibilityState === "hidden" && saveTimer) { clearTimeout(saveTimer); saveCache(); }
+        });
+        window.addEventListener("beforeunload", function () {
+          if (saveTimer) { clearTimeout(saveTimer); saveCache(); }
+        });
+        function loadCache() {
+          try {
+            var raw = localStorage.getItem(CACHE_KEY);
+            if (!raw) return null;
+            var data = JSON.parse(raw);
+            if (!data || !Array.isArray(data.objects)) return null;
+            state.objects = cleanObjects(data.objects).filter(function (o) {
+              return o && (o.kind === "stroke" || o.kind === "rect" || o.kind === "ellipse" || o.kind === "line" || o.kind === "text");
+            });
+            if (data.cam && isFinite(data.cam.x) && isFinite(data.cam.y) && isFinite(data.cam.zoom)) {
+              state.cam = {
+                x: data.cam.x, y: data.cam.y,
+                zoom: Math.max(0.2, Math.min(5, data.cam.zoom))
+              };
+            }
+            if (typeof data.boardDark === "boolean") state.boardDark = data.boardDark;
+            if (typeof data.grid === "boolean") state.grid = data.grid;
+            restoredAt = data.savedAt || null;
+            return data;
+          } catch (err) {
+            return null;
+          }
+        }
 
         /* ---------------- Canvas sizing ---------------- */
         var W = 0, H = 0, DPR = 1;
@@ -498,6 +574,7 @@
           if (state.undoStack.length > 90) state.undoStack.shift();
           state.redoStack = [];
           syncHistoryUI();
+          scheduleSaveCache();
         }
         function syncHistoryUI() {
           document.getElementById("undoBtn").disabled = state.undoStack.length === 0;
@@ -510,13 +587,13 @@
           if (!state.undoStack.length) return;
           state.redoStack.push(snapshot());
           state.objects = state.undoStack.pop();
-          syncHistoryUI(); scheduleDraw();
+          syncHistoryUI(); scheduleDraw(); scheduleSaveCache();
         }
         function redo() {
           if (!state.redoStack.length) return;
           state.undoStack.push(snapshot());
           state.objects = state.redoStack.pop();
-          syncHistoryUI(); scheduleDraw();
+          syncHistoryUI(); scheduleDraw(); scheduleSaveCache();
         }
 
         /* ---------------- Eraser hit test ---------------- */
@@ -681,7 +758,7 @@
 
         function endPointer(e) {
           delete activePointers[e.pointerId];
-          if (panning) { panning = null; return; }
+          if (panning) { panning = null; scheduleSaveCache(); return; }
           if (!drawing) return;
           var d = drawing;
           drawing = null;
@@ -723,6 +800,7 @@
           }
           document.getElementById("zoomLabel").textContent = Math.round(z * 100) + "%";
           scheduleDraw();
+          scheduleSaveCache();
         }
 
         /* ---------------- Text tool ---------------- */
@@ -848,6 +926,7 @@
             el.classList.toggle("active", state[key]);
             el.setAttribute("aria-pressed", state[key] ? "true" : "false");
             if (after) after();
+            scheduleSaveCache();
           });
         }
         wireToggle("pressureToggle", "pressureOn", scheduleDraw);
@@ -860,6 +939,7 @@
           boardBtn.setAttribute("aria-pressed", state.boardDark ? "false" : "true");
           boardBtn.querySelector(".lbl").textContent = state.boardDark ? "Light board" : "Dark board";
           scheduleDraw();
+          scheduleSaveCache();
         });
 
         document.getElementById("undoBtn").addEventListener("click", undo);
@@ -871,6 +951,7 @@
           state.cam = { x: 0, y: 0, zoom: 1 };
           document.getElementById("zoomLabel").textContent = "100%";
           scheduleDraw();
+          scheduleSaveCache();
         });
 
         var clearBtn = document.getElementById("clearBtn");
@@ -918,6 +999,26 @@
         document.addEventListener("keyup", function (e) {
           if (e.key === " ") { spaceDown = false; if (state.tool !== "hand") canvas.classList.remove("hand"); }
         });
+
+        /* ---------------- Restore cached board ---------------- */
+        var restored = loadCache();
+        if (restored) {
+          var gridBtn = document.getElementById("gridToggle");
+          gridBtn.classList.toggle("active", state.grid);
+          gridBtn.setAttribute("aria-pressed", state.grid ? "true" : "false");
+          boardBtn.classList.toggle("active", !state.boardDark);
+          boardBtn.setAttribute("aria-pressed", state.boardDark ? "false" : "true");
+          boardBtn.querySelector(".lbl").textContent = state.boardDark ? "Light board" : "Dark board";
+          document.getElementById("zoomLabel").textContent = Math.round(state.cam.zoom * 100) + "%";
+          if (state.objects.length) {
+            var when = restoredAt
+              ? new Date(restoredAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+              : "";
+            setCacheStatus(when ? "Restored saved board · " + when : "Restored saved board");
+          } else {
+            setCacheStatus("Local save on");
+          }
+        }
 
         syncHistoryUI();
         resize();
