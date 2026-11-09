@@ -1,0 +1,927 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <link rel="icon" href="data:," />
+    <title>Whiteboard</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #101216;
+        --panel: #191c22;
+        --panel-2: #21252e;
+        --line: #2e333f;
+        --ink: #eceef2;
+        --ink-dim: #9aa3b2;
+        --ink-faint: #6b7280;
+        --accent: #ffb224;
+        --accent-ink: #1a1405;
+        --danger: #ff6b6b;
+        --board-dark: #17191f;
+        --board-light: #f6f4ef;
+        --radius: 10px;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: ui-sans-system, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        display: flex;
+        flex-direction: column;
+        height: 100dvh;
+        overflow: hidden;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+
+      /* ---------- Toolbar ---------- */
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px 10px;
+        padding: 8px 10px;
+        background: var(--panel);
+        border-bottom: 1px solid var(--line);
+        z-index: 20;
+      }
+      .group {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding-right: 10px;
+        border-right: 1px solid var(--line);
+      }
+      .group:last-child { border-right: none; padding-right: 0; }
+      .group-label {
+        font-size: 10px;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+        color: var(--ink-faint);
+        margin-right: 2px;
+        white-space: nowrap;
+      }
+      button.tool, button.act, button.toggle {
+        appearance: none;
+        border: 1px solid transparent;
+        background: transparent;
+        color: var(--ink-dim);
+        font: inherit;
+        font-size: 12.5px;
+        line-height: 1;
+        padding: 7px 9px;
+        border-radius: var(--radius);
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        white-space: nowrap;
+      }
+      button.tool svg, button.act svg, button.toggle svg { width: 16px; height: 16px; flex: none; }
+      button.tool:hover, button.act:hover, button.toggle:hover { background: var(--panel-2); color: var(--ink); }
+      button.tool.active {
+        background: var(--accent);
+        color: var(--accent-ink);
+        border-color: var(--accent);
+      }
+      button.toggle.active { background: var(--panel-2); color: var(--accent); border-color: var(--line); }
+      button.act:disabled { opacity: .35; cursor: default; }
+      button.act:disabled:hover { background: transparent; color: var(--ink-dim); }
+      button.act.danger.armed { background: var(--danger); color: #20090a; border-color: var(--danger); }
+      button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+      .swatches { display: flex; align-items: center; gap: 5px; }
+      .swatch {
+        width: 22px; height: 22px;
+        border-radius: 50%;
+        border: 2px solid transparent;
+        padding: 0;
+        cursor: pointer;
+        flex: none;
+        position: relative;
+      }
+      .swatch.active { border-color: var(--ink); box-shadow: 0 0 0 2px var(--panel), 0 0 0 3.5px currentColor; }
+      .custom-color {
+        width: 26px; height: 26px;
+        border: none; padding: 0; background: none; cursor: pointer; flex: none;
+      }
+      .custom-color::-webkit-color-swatch-wrapper { padding: 0; }
+      .custom-color::-webkit-color-swatch { border: 1px solid var(--line); border-radius: 50%; }
+
+      .size-wrap { display: flex; align-items: center; gap: 7px; }
+      input[type="range"] { width: 104px; accent-color: var(--accent); }
+      .size-val { font-size: 12px; color: var(--ink-dim); min-width: 30px; font-variant-numeric: tabular-nums; }
+      .brush-dot { background: var(--ink); border-radius: 50%; flex: none; }
+
+      /* ---------- Stage ---------- */
+      .stage { position: relative; flex: 1; min-height: 0; }
+      canvas#board {
+        position: absolute; inset: 0;
+        width: 100%; height: 100%;
+        display: block;
+        touch-action: none;
+        cursor: crosshair;
+      }
+      canvas#board.hand { cursor: grab; }
+      canvas#board.hand:active { cursor: grabbing; }
+      canvas#board.text { cursor: text; }
+      canvas#board.erasing { cursor: cell; }
+
+      .text-editor {
+        position: absolute;
+        z-index: 30;
+        display: none;
+        background: transparent;
+        border: none;
+        border-bottom: 2px dashed var(--accent);
+        color: var(--ink);
+        font-family: "Segoe Print", "Bradley Hand", "Comic Sans MS", cursive;
+        padding: 0 2px 2px;
+        outline: none;
+        -webkit-user-select: text;
+        user-select: text;
+      }
+      .text-editor.on-dark { color: #fff; }
+      .text-editor.on-light { color: #17181c; }
+
+      .empty-hint {
+        position: absolute;
+        left: 50%; top: 46%;
+        transform: translate(-50%, -50%);
+        text-align: center;
+        color: var(--ink-faint);
+        pointer-events: none;
+        z-index: 5;
+        padding: 0 20px;
+      }
+      .empty-hint .big { font-size: 19px; color: var(--ink-dim); margin-bottom: 6px; }
+      .empty-hint .small { font-size: 13px; line-height: 1.55; }
+      .empty-hint.hidden { display: none; }
+
+      /* ---------- Status bar ---------- */
+      .statusbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 4px 16px;
+        padding: 6px 12px;
+        background: var(--panel);
+        border-top: 1px solid var(--line);
+        font-size: 12px;
+        color: var(--ink-dim);
+        z-index: 20;
+        font-variant-numeric: tabular-nums;
+      }
+      .statusbar .spacer { flex: 1; }
+      .pen-state { display: inline-flex; align-items: center; gap: 7px; }
+      .pen-dot {
+        width: 8px; height: 8px; border-radius: 50%;
+        background: var(--ink-faint); flex: none;
+      }
+      .pen-dot.live { background: var(--accent); box-shadow: 0 0 7px var(--accent); }
+      .meter {
+        width: 74px; height: 6px; border-radius: 3px;
+        background: var(--panel-2); overflow: hidden; flex: none;
+      }
+      .meter > div { height: 100%; width: 0%; background: var(--accent); transition: width 40ms linear; }
+      .kbd {
+        font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+        font-size: 11px;
+        background: var(--panel-2);
+        border: 1px solid var(--line);
+        border-bottom-width: 2px;
+        border-radius: 5px;
+        padding: 0 4px;
+      }
+      @media (max-width: 760px) {
+        .group-label, .shortcuts-hint { display: none; }
+        button.tool span.lbl, button.act span.lbl, button.toggle span.lbl { display: none; }
+        button.tool, button.act, button.toggle { padding: 8px; }
+        input[type="range"] { width: 74px; }
+        .empty-hint .big { font-size: 16px; }
+      }
+    </style>
+  </head>
+  <body>
+
+    <!-- ================= Toolbar ================= -->
+    <div class="toolbar" role="toolbar" aria-label="Whiteboard tools">
+
+      <div class="group" role="group" aria-label="Drawing tools">
+        <button class="tool active" data-tool="pen" title="Pen — pressure-sensitive (B)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+          <span class="lbl">Pen</span>
+        </button>
+        <button class="tool" data-tool="marker" title="Highlighter (H)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 11-6 6v3h3l6-6"/><path d="m13 7 4-4 4 4-4 4"/><path d="m21 3-9.5 9.5"/></svg>
+          <span class="lbl">Marker</span>
+        </button>
+        <button class="tool" data-tool="eraser" title="Stroke eraser — or flip your Wacom pen over (E)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/></svg>
+          <span class="lbl">Eraser</span>
+        </button>
+        <button class="tool" data-tool="line" title="Straight line (L)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 19 19 5"/></svg>
+          <span class="lbl">Line</span>
+        </button>
+        <button class="tool" data-tool="rect" title="Rectangle (R)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3.5" y="5.5" width="17" height="13" rx="1"/></svg>
+          <span class="lbl">Rect</span>
+        </button>
+        <button class="tool" data-tool="ellipse" title="Ellipse (O)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="12" rx="9" ry="6.5"/></svg>
+          <span class="lbl">Ellipse</span>
+        </button>
+        <button class="tool" data-tool="text" title="Text — click the board to type (T)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 6V4h14v2"/><path d="M12 4v16"/><path d="M9 20h6"/></svg>
+          <span class="lbl">Text</span>
+        </button>
+        <button class="tool" data-tool="hand" title="Pan the board (Space + drag also works)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 11V6.5a1.5 1.5 0 0 0-3 0V11"/><path d="M15 10V4.5a1.5 1.5 0 0 0-3 0V10"/><path d="M12 10V6a1.5 1.5 0 0 0-3 0v7"/><path d="M18 8a1.5 1.5 0 0 1 3 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.9-2.34l-3.4-3.6a1.5 1.5 0 0 1 2.18-2.03L6 15V6.5a1.5 1.5 0 0 1 3 0"/></svg>
+          <span class="lbl">Pan</span>
+        </button>
+      </div>
+
+      <div class="group" role="group" aria-label="Ink colour">
+        <span class="group-label">Ink</span>
+        <div class="swatches" id="swatches"></div>
+        <input type="color" class="custom-color" id="customColor" value="#4dabf7" title="Custom colour" aria-label="Custom colour" />
+      </div>
+
+      <div class="group" role="group" aria-label="Brush size">
+        <span class="group-label">Size</span>
+        <div class="size-wrap">
+          <span class="brush-dot" id="brushDot" style="width:6px;height:6px"></span>
+          <input type="range" id="sizeRange" min="1" max="40" step="1" value="4" aria-label="Brush size" />
+          <span class="size-val" id="sizeVal">4 px</span>
+        </div>
+      </div>
+
+      <div class="group" role="group" aria-label="Pen options">
+        <button class="toggle active" id="pressureToggle" aria-pressed="true" title="Use Wacom pen pressure to vary line width">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 18c4-1 5-12 9-12 3.5 0 4 8 9 9"/></svg>
+          <span class="lbl">Pressure</span>
+        </button>
+        <button class="toggle active" id="palmToggle" aria-pressed="true" title="Ignore touch input while drawing, so resting your palm on the tablet doesn't draw">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5S12 2 12 2 9.5 7.5 8 10.5C6 12.1 5 13.9 5 15a7 7 0 0 0 7 7Z"/></svg>
+          <span class="lbl">Palm reject</span>
+        </button>
+        <button class="toggle active" id="gridToggle" aria-pressed="true" title="Dot grid">
+          <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="5" r="1.4"/><circle cx="12" cy="5" r="1.4"/><circle cx="19" cy="5" r="1.4"/><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/><circle cx="5" cy="19" r="1.4"/><circle cx="12" cy="19" r="1.4"/><circle cx="19" cy="19" r="1.4"/></svg>
+          <span class="lbl">Grid</span>
+        </button>
+        <button class="toggle" id="boardToggle" aria-pressed="false" title="Switch the board between dark and light">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+          <span class="lbl">Light board</span>
+        </button>
+      </div>
+
+      <div class="group" role="group" aria-label="View">
+        <button class="act" id="zoomOut" title="Zoom out">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3M8 11h6"/></svg>
+        </button>
+        <button class="act" id="zoomReset" title="Reset view"><span id="zoomLabel" style="font-variant-numeric:tabular-nums">100%</span></button>
+        <button class="act" id="zoomIn" title="Zoom in">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3M8 11h6M11 8v6"/></svg>
+        </button>
+      </div>
+
+      <div class="group" role="group" aria-label="Actions">
+        <button class="act" id="undoBtn" title="Undo (Ctrl+Z)" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>
+          <span class="lbl">Undo</span>
+        </button>
+        <button class="act" id="redoBtn" title="Redo (Ctrl+Shift+Z)" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg>
+          <span class="lbl">Redo</span>
+        </button>
+        <button class="act" id="exportBtn" title="Download the board as a PNG image">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg>
+          <span class="lbl">Export PNG</span>
+        </button>
+        <button class="act danger" id="clearBtn" title="Remove everything from the board (undo brings it back)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          <span class="lbl">Clear</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- ================= Stage ================= -->
+    <div class="stage" id="stage">
+      <canvas id="board"></canvas>
+      <input class="text-editor" id="textEditor" type="text" placeholder="Type, then Enter" autocomplete="off" />
+      <div class="empty-hint" id="emptyHint">
+        <div class="big">Pick up your pen and draw.</div>
+        <div class="small">
+          Your Wacom works as-is — pressure, tilt and the eraser end are read straight from the browser.<br />
+          Rest your palm freely: touch is ignored while <em>Palm reject</em> is on.
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= Status bar ================= -->
+    <div class="statusbar">
+      <span class="pen-state">
+        <span class="pen-dot" id="penDot"></span>
+        <span id="penKind">No pen detected yet — draw once with the Wacom</span>
+      </span>
+      <span class="pen-state">
+        Pressure
+        <span class="meter"><div id="pressureFill"></div></span>
+        <span id="pressureVal">0%</span>
+      </span>
+      <span id="tiltVal">Tilt 0° / 0°</span>
+      <span class="spacer"></span>
+      <span id="objCount">0 objects</span>
+      <span class="shortcuts-hint">
+        <span class="kbd">B</span> pen · <span class="kbd">E</span> eraser · <span class="kbd">Ctrl Z</span> undo · <span class="kbd">Space</span>+drag pan · scroll to zoom
+      </span>
+    </div>
+
+    <script>
+      (function () {
+        "use strict";
+
+        var canvas = document.getElementById("board");
+        var stage = document.getElementById("stage");
+        var ctx = canvas.getContext("2d");
+        var textEditor = document.getElementById("textEditor");
+        var emptyHint = document.getElementById("emptyHint");
+
+        /* ---------------- State ---------------- */
+        var PALETTE = ["#f2f3f5", "#ffd60a", "#ff8787", "#ffa94d", "#69db7c", "#38d9a9", "#4dabf7", "#9775fa", "#f783ac", "#23252b"];
+        var state = {
+          tool: "pen",
+          color: PALETTE[6],
+          size: 4,
+          pressureOn: true,
+          palmReject: true,
+          grid: true,
+          boardDark: true,
+          objects: [],        // committed strokes / shapes / text
+          undoStack: [],      // snapshots (arrays) of objects
+          redoStack: [],
+          cam: { x: 0, y: 0, zoom: 1 }
+        };
+
+        var drawing = null;   // in-progress stroke or shape
+        var panning = null;   // in-progress pan
+        var erasedAny = false;
+        var spaceDown = false;
+        var rafPending = false;
+
+        var INK_FONT = '"Segoe Print","Bradley Hand","Comic Sans MS",cursive';
+
+        /* ---------------- Canvas sizing ---------------- */
+        var W = 0, H = 0, DPR = 1;
+        function resize() {
+          var r = stage.getBoundingClientRect();
+          DPR = Math.min(window.devicePixelRatio || 1, 2.5);
+          W = Math.max(1, r.width); H = Math.max(1, r.height);
+          canvas.width = Math.round(W * DPR);
+          canvas.height = Math.round(H * DPR);
+          scheduleDraw();
+        }
+        new ResizeObserver(resize).observe(stage);
+
+        /* ---------------- Coordinates ---------------- */
+        function toWorld(sx, sy) {
+          return { x: (sx - state.cam.x) / state.cam.zoom, y: (sy - state.cam.y) / state.cam.zoom };
+        }
+        function toScreen(wx, wy) {
+          return { x: wx * state.cam.zoom + state.cam.x, y: wy * state.cam.zoom + state.cam.y };
+        }
+        function evtPos(e) {
+          var r = canvas.getBoundingClientRect();
+          return { sx: e.clientX - r.left, sy: e.clientY - r.top };
+        }
+
+        /* ---------------- Rendering ---------------- */
+        function scheduleDraw() {
+          if (rafPending) return;
+          rafPending = true;
+          requestAnimationFrame(function () { rafPending = false; draw(); });
+        }
+
+        function draw() {
+          ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+          ctx.fillStyle = state.boardDark ? "#17191f" : "#f6f4ef";
+          ctx.fillRect(0, 0, W, H);
+          if (state.grid) drawGrid();
+          ctx.translate(state.cam.x, state.cam.y);
+          ctx.scale(state.cam.zoom, state.cam.zoom);
+          for (var i = 0; i < state.objects.length; i++) drawObject(ctx, state.objects[i]);
+          if (drawing) drawObject(ctx, drawing);
+        }
+
+        function drawGrid() {
+          var step = 34;
+          var tl = toWorld(0, 0), br = toWorld(W, H);
+          var x0 = Math.floor(tl.x / step) * step, y0 = Math.floor(tl.y / step) * step;
+          ctx.save();
+          ctx.fillStyle = state.boardDark ? "rgba(255,255,255,0.13)" : "rgba(30,32,40,0.16)";
+          for (var x = x0; x <= br.x; x += step) {
+            for (var y = y0; y <= br.y; y += step) {
+              var s = toScreen(x, y);
+              ctx.beginPath();
+              ctx.arc(s.x, s.y, 1.3, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          }
+          ctx.restore();
+        }
+
+        function strokeWidth(obj, p) {
+          var base = obj.size;
+          if (obj.tool === "marker") base = obj.size * 3.2;
+          if (!state.pressureOn || p == null) return base;
+          return Math.max(0.4, base * (0.15 + p * 1.05));
+        }
+
+        function drawObject(c, obj) {
+          c.save();
+          c.lineCap = "round";
+          c.lineJoin = "round";
+          if (obj.kind === "stroke") {
+            c.strokeStyle = obj.color;
+            c.globalAlpha = obj.tool === "marker" ? 0.32 : 1;
+            if (obj.pts.length === 1) {
+              c.fillStyle = obj.color;
+              c.beginPath();
+              c.arc(obj.pts[0].x, obj.pts[0].y, strokeWidth(obj, obj.pts[0].p) / 2, 0, Math.PI * 2);
+              c.fill();
+            } else {
+              for (var i = 1; i < obj.pts.length; i++) {
+                var a = obj.pts[i - 1], b = obj.pts[i];
+                var midP = (a.p + b.p) / 2;
+                c.lineWidth = strokeWidth(obj, obj.smooth ? midP : b.p);
+                c.beginPath();
+                if (obj.smooth && i > 1) {
+                  var prev = obj.pts[i - 2];
+                  var mx = (prev.x + a.x) / 2, my = (prev.y + a.y) / 2;
+                  var mx2 = (a.x + b.x) / 2, my2 = (a.y + b.y) / 2;
+                  c.moveTo(mx, my);
+                  c.quadraticCurveTo(a.x, a.y, mx2, my2);
+                } else {
+                  c.moveTo(a.x, a.y);
+                  c.lineTo(b.x, b.y);
+                }
+                c.stroke();
+              }
+            }
+          } else if (obj.kind === "rect" || obj.kind === "ellipse" || obj.kind === "line") {
+            c.strokeStyle = obj.color;
+            c.globalAlpha = 1;
+            c.lineWidth = obj.size;
+            c.beginPath();
+            if (obj.kind === "rect") c.rect(obj.x, obj.y, obj.w, obj.h);
+            else if (obj.kind === "line") { c.moveTo(obj.x, obj.y); c.lineTo(obj.x + obj.w, obj.y + obj.h); }
+            else c.ellipse(obj.x + obj.w / 2, obj.y + obj.h / 2, Math.abs(obj.w) / 2, Math.abs(obj.h) / 2, 0, 0, Math.PI * 2);
+            c.stroke();
+          } else if (obj.kind === "text") {
+            c.fillStyle = obj.color;
+            c.font = obj.size + "px " + INK_FONT;
+            c.textBaseline = "top";
+            c.fillText(obj.text, obj.x, obj.y);
+          }
+          c.restore();
+        }
+
+        /* ---------------- History ---------------- */
+        function snapshot() { return state.objects.slice(); }
+        function commitHistory(before) {
+          state.undoStack.push(before);
+          if (state.undoStack.length > 90) state.undoStack.shift();
+          state.redoStack = [];
+          syncHistoryUI();
+        }
+        function syncHistoryUI() {
+          document.getElementById("undoBtn").disabled = state.undoStack.length === 0;
+          document.getElementById("redoBtn").disabled = state.redoStack.length === 0;
+          document.getElementById("objCount").textContent =
+            state.objects.length + (state.objects.length === 1 ? " object" : " objects");
+          emptyHint.classList.toggle("hidden", state.objects.length > 0);
+        }
+        function undo() {
+          if (!state.undoStack.length) return;
+          state.redoStack.push(snapshot());
+          state.objects = state.undoStack.pop();
+          syncHistoryUI(); scheduleDraw();
+        }
+        function redo() {
+          if (!state.redoStack.length) return;
+          state.undoStack.push(snapshot());
+          state.objects = state.redoStack.pop();
+          syncHistoryUI(); scheduleDraw();
+        }
+
+        /* ---------------- Eraser hit test ---------------- */
+        function segDist(px, py, ax, ay, bx, by) {
+          var dx = bx - ax, dy = by - ay;
+          var len2 = dx * dx + dy * dy;
+          var t = len2 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0;
+          t = Math.max(0, Math.min(1, t));
+          var ex = ax + t * dx - px, ey = ay + t * dy - py;
+          return Math.sqrt(ex * ex + ey * ey);
+        }
+        function objectHit(obj, p, radius) {
+          var i;
+          if (obj.kind === "stroke") {
+            if (obj.pts.length === 1) {
+              var dx = obj.pts[0].x - p.x, dy = obj.pts[0].y - p.y;
+              return Math.sqrt(dx * dx + dy * dy) <= radius + obj.size;
+            }
+            for (i = 1; i < obj.pts.length; i++) {
+              if (segDist(p.x, p.y, obj.pts[i - 1].x, obj.pts[i - 1].y, obj.pts[i].x, obj.pts[i].y) <= radius + obj.size / 2) return true;
+            }
+            return false;
+          }
+          if (obj.kind === "text") {
+            return p.x >= obj.x - radius && p.x <= obj.x + obj.text.length * obj.size * 0.62 + radius &&
+                   p.y >= obj.y - radius && p.y <= obj.y + obj.size * 1.3 + radius;
+          }
+          // shapes: sample the outline coarsely
+          var steps = 24;
+          for (i = 0; i <= steps; i++) {
+            var t = i / steps, sx, sy;
+            if (obj.kind === "line") { sx = obj.x + obj.w * t; sy = obj.y + obj.h * t; }
+            else if (obj.kind === "rect") {
+              if (i <= 6) { sx = obj.x + obj.w * (i / 6); sy = obj.y; }
+              else if (i <= 12) { sx = obj.x + obj.w; sy = obj.y + obj.h * ((i - 6) / 6); }
+              else if (i <= 18) { sx = obj.x + obj.w * (1 - (i - 12) / 6); sy = obj.y + obj.h; }
+              else { sx = obj.x; sy = obj.y + obj.h * (1 - (i - 18) / 6); }
+            } else {
+              var ang = t * Math.PI * 2;
+              sx = obj.x + obj.w / 2 + Math.cos(ang) * obj.w / 2;
+              sy = obj.y + obj.h / 2 + Math.sin(ang) * obj.h / 2;
+            }
+            var ddx = sx - p.x, ddy = sy - p.y;
+            if (Math.sqrt(ddx * ddx + ddy * ddy) <= radius + obj.size / 2) return true;
+          }
+          return false;
+        }
+        function eraseAt(p) {
+          var radius = (state.size * 2.2) / 1; // world units
+          var kept = [];
+          var removed = false;
+          for (var i = 0; i < state.objects.length; i++) {
+            if (objectHit(state.objects[i], p, radius)) removed = true;
+            else kept.push(state.objects[i]);
+          }
+          if (removed) {
+            state.objects = kept;
+            erasedAny = true;
+            syncHistoryUI();
+            scheduleDraw();
+          }
+        }
+
+        /* ---------------- Pen telemetry ---------------- */
+        var penDot = document.getElementById("penDot");
+        var penKind = document.getElementById("penKind");
+        var pressureFill = document.getElementById("pressureFill");
+        var pressureVal = document.getElementById("pressureVal");
+        var tiltVal = document.getElementById("tiltVal");
+        function telemetry(e) {
+          var pct = Math.round((e.pressure || 0) * 100);
+          pressureFill.style.width = pct + "%";
+          pressureVal.textContent = pct + "%";
+          tiltVal.textContent = "Tilt " + (e.tiltX || 0) + "° / " + (e.tiltY || 0) + "°";
+          if (e.pointerType === "pen") {
+            penDot.classList.add("live");
+            penKind.textContent = isEraserEnd(e) ? "Wacom pen — eraser end" : "Wacom pen — drawing end";
+          } else if (e.pointerType === "touch") {
+            penKind.textContent = "Touch input";
+          } else if (e.pointerType === "mouse") {
+            penKind.textContent = "Mouse";
+          }
+        }
+        function isEraserEnd(e) {
+          // Wacom eraser end: button 5 on pointerdown, buttons bit 32 while moving
+          return e.button === 5 || (e.buttons & 32) !== 0;
+        }
+
+        /* ---------------- Pointer handling ---------------- */
+        var activePointers = {};
+
+        canvas.addEventListener("pointerdown", function (e) {
+          canvas.setPointerCapture(e.pointerId);
+          activePointers[e.pointerId] = e.pointerType;
+          telemetry(e);
+          var pos = evtPos(e);
+          var w = toWorld(pos.sx, pos.sy);
+
+          // Pan: hand tool, space held, middle button, or right button
+          if (state.tool === "hand" || spaceDown || e.button === 1 || e.button === 2) {
+            panning = { sx: pos.sx, sy: pos.sy, camX: state.cam.x, camY: state.cam.y };
+            e.preventDefault();
+            return;
+          }
+          if (e.button !== 0 && !isEraserEnd(e)) return;
+          if (state.palmReject && e.pointerType === "touch") return; // palm / finger rest
+
+          var tool = isEraserEnd(e) ? "eraser" : state.tool;
+
+          if (tool === "text") { openTextEditor(pos, w); return; }
+
+          if (tool === "eraser") {
+            drawing = { erase: true, before: snapshot() };
+            erasedAny = false;
+            eraseAt(w);
+            return;
+          }
+          if (tool === "line" || tool === "rect" || tool === "ellipse") {
+            drawing = { kind: tool, x: w.x, y: w.y, w: 0, h: 0, color: state.color, size: state.size, before: snapshot() };
+            scheduleDraw();
+            return;
+          }
+          // pen / marker stroke — coalesced events give full Wacom sample rate
+          drawing = {
+            kind: "stroke", tool: tool, color: state.color, size: state.size,
+            smooth: true, pts: [{ x: w.x, y: w.y, p: e.pressure || 0.5 }], before: snapshot()
+          };
+          scheduleDraw();
+        });
+
+        canvas.addEventListener("pointermove", function (e) {
+          telemetry(e);
+          var pos = evtPos(e);
+          if (panning) {
+            state.cam.x = panning.camX + (pos.sx - panning.sx);
+            state.cam.y = panning.camY + (pos.sy - panning.sy);
+            scheduleDraw();
+            return;
+          }
+          if (!drawing) return;
+          var events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+          if (!events.length) events = [e];
+          for (var i = 0; i < events.length; i++) {
+            var ep = evtPos(events[i]);
+            var w = toWorld(ep.sx, ep.sy);
+            if (drawing.erase) {
+              eraseAt(w);
+            } else if (drawing.kind === "stroke") {
+              var last = drawing.pts[drawing.pts.length - 1];
+              var ddx = w.x - last.x, ddy = w.y - last.y;
+              var minStep = 0.6 / state.cam.zoom;
+              if (ddx * ddx + ddy * ddy >= minStep * minStep || events[i].pressure === 0) {
+                drawing.pts.push({ x: w.x, y: w.y, p: events[i].pressure || 0 });
+              }
+            } else {
+              drawing.w = w.x - drawing.x;
+              drawing.h = w.y - drawing.y;
+            }
+          }
+          scheduleDraw();
+        });
+
+        function endPointer(e) {
+          delete activePointers[e.pointerId];
+          if (panning) { panning = null; return; }
+          if (!drawing) return;
+          var d = drawing;
+          drawing = null;
+          if (d.erase) {
+            if (erasedAny) commitHistory(d.before);
+            erasedAny = false;
+          } else if (d.kind === "stroke") {
+            if (d.pts.length) { state.objects.push(d); commitHistory(d.before); }
+          } else {
+            // shapes: require a real drag
+            if (Math.abs(d.w) > 2 / state.cam.zoom || Math.abs(d.h) > 2 / state.cam.zoom) {
+              state.objects.push(d);
+              commitHistory(d.before);
+            }
+          }
+          delete d.before;
+          syncHistoryUI();
+          scheduleDraw();
+        }
+        canvas.addEventListener("pointerup", endPointer);
+        canvas.addEventListener("pointercancel", endPointer);
+        canvas.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+
+        // Wheel zoom, centred on the cursor
+        canvas.addEventListener("wheel", function (e) {
+          e.preventDefault();
+          var pos = evtPos(e);
+          var before = toWorld(pos.sx, pos.sy);
+          var factor = e.deltaY < 0 ? 1.09 : 1 / 1.09;
+          setZoom(state.cam.zoom * factor, pos.sx, pos.sy, before);
+        }, { passive: false });
+
+        function setZoom(z, sx, sy, worldAnchor) {
+          z = Math.max(0.2, Math.min(5, z));
+          state.cam.zoom = z;
+          if (worldAnchor) {
+            state.cam.x = sx - worldAnchor.x * z;
+            state.cam.y = sy - worldAnchor.y * z;
+          }
+          document.getElementById("zoomLabel").textContent = Math.round(z * 100) + "%";
+          scheduleDraw();
+        }
+
+        /* ---------------- Text tool ---------------- */
+        var textWorld = null;
+        function openTextEditor(screenPos, worldPos) {
+          textWorld = worldPos;
+          var fontPx = Math.max(14, state.size * 5 * state.cam.zoom);
+          textEditor.style.left = screenPos.sx + "px";
+          textEditor.style.top = screenPos.sy + "px";
+          textEditor.style.fontSize = fontPx + "px";
+          textEditor.style.width = Math.max(180, W - screenPos.sx - 16) + "px";
+          textEditor.className = "text-editor " + (state.boardDark ? "on-dark" : "on-light");
+          textEditor.style.fontFamily = INK_FONT;
+          textEditor.style.display = "block";
+          textEditor.value = "";
+          setTimeout(function () { textEditor.focus(); }, 0);
+        }
+        function commitText() {
+          var val = textEditor.value.trim();
+          textEditor.style.display = "none";
+          if (val && textWorld) {
+            var before = snapshot();
+            state.objects.push({
+              kind: "text", text: val, x: textWorld.x, y: textWorld.y,
+              size: Math.max(14, state.size * 5), color: state.color
+            });
+            commitHistory(before);
+            syncHistoryUI();
+            scheduleDraw();
+          }
+          textWorld = null;
+        }
+        textEditor.addEventListener("keydown", function (e) {
+          if (e.key === "Enter") { e.preventDefault(); commitText(); }
+          if (e.key === "Escape") { textEditor.value = ""; commitText(); }
+          e.stopPropagation();
+        });
+        textEditor.addEventListener("blur", commitText);
+
+        /* ---------------- Export PNG ---------------- */
+        function exportPNG() {
+          var pad = 40;
+          var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+          function grow(x, y) { minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); }
+          state.objects.forEach(function (o) {
+            var i;
+            if (o.kind === "stroke") for (i = 0; i < o.pts.length; i++) grow(o.pts[i].x, o.pts[i].y);
+            else if (o.kind === "text") { grow(o.x, o.y); grow(o.x + o.text.length * o.size * 0.62, o.y + o.size * 1.3); }
+            else { grow(Math.min(o.x, o.x + o.w), Math.min(o.y, o.y + o.h)); grow(Math.max(o.x, o.x + o.w), Math.max(o.y, o.y + o.h)); }
+          });
+          if (!isFinite(minX)) { var tl = toWorld(0, 0), br = toWorld(W, H); minX = tl.x; minY = tl.y; maxX = br.x; maxY = br.y; }
+          minX -= pad; minY -= pad; maxX += pad; maxY += pad;
+          var wWorld = maxX - minX, hWorld = maxY - minY;
+          var scale = Math.min(2, 4096 / Math.max(wWorld, hWorld));
+          var out = document.createElement("canvas");
+          out.width = Math.max(1, Math.round(wWorld * scale));
+          out.height = Math.max(1, Math.round(hWorld * scale));
+          var c = out.getContext("2d");
+          c.fillStyle = state.boardDark ? "#17191f" : "#f6f4ef";
+          c.fillRect(0, 0, out.width, out.height);
+          c.translate(-minX * scale, -minY * scale);
+          c.scale(scale, scale);
+          state.objects.forEach(function (o) { drawObject(c, o); });
+          var a = document.createElement("a");
+          a.download = "whiteboard.png";
+          a.href = out.toDataURL("image/png");
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+        }
+
+        /* ---------------- Toolbar wiring ---------------- */
+        var cursorFor = { pen: "crosshair", marker: "crosshair", eraser: "cell", line: "crosshair", rect: "crosshair", ellipse: "crosshair", text: "text", hand: "grab" };
+        function setTool(t) {
+          state.tool = t;
+          document.querySelectorAll("button.tool").forEach(function (b) {
+            b.classList.toggle("active", b.dataset.tool === t);
+          });
+          canvas.className = t === "hand" ? "hand" : (t === "text" ? "text" : (t === "eraser" ? "erasing" : ""));
+          canvas.style.cursor = cursorFor[t] || "crosshair";
+        }
+        document.querySelectorAll("button.tool").forEach(function (b) {
+          b.addEventListener("click", function () { setTool(b.dataset.tool); });
+        });
+
+        var swWrap = document.getElementById("swatches");
+        PALETTE.forEach(function (hex) {
+          var b = document.createElement("button");
+          b.className = "swatch" + (hex === state.color ? " active" : "");
+          b.style.background = hex;
+          b.style.color = hex;
+          b.title = hex;
+          b.setAttribute("aria-label", "Ink colour " + hex);
+          b.addEventListener("click", function () {
+            state.color = hex;
+            swWrap.querySelectorAll(".swatch").forEach(function (s) { s.classList.remove("active"); });
+            b.classList.add("active");
+            if (state.tool === "eraser") setTool("pen");
+          });
+          swWrap.appendChild(b);
+        });
+        document.getElementById("customColor").addEventListener("input", function (e) {
+          state.color = e.target.value;
+          swWrap.querySelectorAll(".swatch").forEach(function (s) { s.classList.remove("active"); });
+          if (state.tool === "eraser") setTool("pen");
+        });
+
+        var sizeRange = document.getElementById("sizeRange");
+        function syncSize() {
+          state.size = parseInt(sizeRange.value, 10);
+          document.getElementById("sizeVal").textContent = state.size + " px";
+          var d = document.getElementById("brushDot");
+          var px = Math.max(3, Math.min(22, state.size));
+          d.style.width = px + "px"; d.style.height = px + "px";
+        }
+        sizeRange.addEventListener("input", syncSize);
+        syncSize();
+
+        function wireToggle(id, key, after) {
+          var el = document.getElementById(id);
+          el.addEventListener("click", function () {
+            state[key] = !state[key];
+            el.classList.toggle("active", state[key]);
+            el.setAttribute("aria-pressed", state[key] ? "true" : "false");
+            if (after) after();
+          });
+        }
+        wireToggle("pressureToggle", "pressureOn", scheduleDraw);
+        wireToggle("palmToggle", "palmReject");
+        wireToggle("gridToggle", "grid", scheduleDraw);
+        var boardBtn = document.getElementById("boardToggle");
+        boardBtn.addEventListener("click", function () {
+          state.boardDark = !state.boardDark;
+          boardBtn.classList.toggle("active", !state.boardDark);
+          boardBtn.setAttribute("aria-pressed", state.boardDark ? "false" : "true");
+          boardBtn.querySelector(".lbl").textContent = state.boardDark ? "Light board" : "Dark board";
+          scheduleDraw();
+        });
+
+        document.getElementById("undoBtn").addEventListener("click", undo);
+        document.getElementById("redoBtn").addEventListener("click", redo);
+        document.getElementById("exportBtn").addEventListener("click", exportPNG);
+        document.getElementById("zoomIn").addEventListener("click", function () { setZoom(state.cam.zoom * 1.2, W / 2, H / 2, toWorld(W / 2, H / 2)); });
+        document.getElementById("zoomOut").addEventListener("click", function () { setZoom(state.cam.zoom / 1.2, W / 2, H / 2, toWorld(W / 2, H / 2)); });
+        document.getElementById("zoomReset").addEventListener("click", function () {
+          state.cam = { x: 0, y: 0, zoom: 1 };
+          document.getElementById("zoomLabel").textContent = "100%";
+          scheduleDraw();
+        });
+
+        var clearBtn = document.getElementById("clearBtn");
+        var clearTimer = null;
+        clearBtn.addEventListener("click", function () {
+          if (!clearBtn.classList.contains("armed")) {
+            clearBtn.classList.add("armed");
+            clearBtn.querySelector(".lbl").textContent = "Sure?";
+            clearTimer = setTimeout(function () {
+              clearBtn.classList.remove("armed");
+              clearBtn.querySelector(".lbl").textContent = "Clear";
+            }, 2600);
+            return;
+          }
+          clearTimeout(clearTimer);
+          clearBtn.classList.remove("armed");
+          clearBtn.querySelector(".lbl").textContent = "Clear";
+          if (!state.objects.length) return;
+          var before = snapshot();
+          state.objects = [];
+          commitHistory(before);
+          syncHistoryUI();
+          scheduleDraw();
+        });
+
+        /* ---------------- Keyboard ---------------- */
+        document.addEventListener("keydown", function (e) {
+          if (e.target === textEditor) return;
+          var mod = e.ctrlKey || e.metaKey;
+          if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
+          if (mod && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); return; }
+          if (mod || e.altKey) return;
+          switch (e.key) {
+            case " ": spaceDown = true; canvas.classList.add("hand"); e.preventDefault(); break;
+            case "b": case "B": setTool("pen"); break;
+            case "h": case "H": setTool("marker"); break;
+            case "e": case "E": setTool("eraser"); break;
+            case "l": case "L": setTool("line"); break;
+            case "r": case "R": setTool("rect"); break;
+            case "o": case "O": setTool("ellipse"); break;
+            case "t": case "T": setTool("text"); break;
+            case "v": case "V": setTool("hand"); break;
+          }
+        });
+        document.addEventListener("keyup", function (e) {
+          if (e.key === " ") { spaceDown = false; if (state.tool !== "hand") canvas.classList.remove("hand"); }
+        });
+
+        syncHistoryUI();
+        resize();
+      })();
+    </script>
+  </body>
+</html>
