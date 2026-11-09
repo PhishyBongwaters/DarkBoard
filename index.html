@@ -130,6 +130,61 @@
       canvas#board.hand:active { cursor: grabbing; }
       canvas#board.text { cursor: text; }
       canvas#board.erasing { cursor: cell; }
+      canvas#board.select { cursor: default; }
+      canvas#board.node { cursor: copy; }
+
+      /* ---------- Node editor ---------- */
+      .node-editor {
+        position: absolute;
+        z-index: 40;
+        display: none;
+        width: 232px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 10px;
+        box-shadow: 0 14px 34px rgba(0,0,0,.45);
+      }
+      .node-editor.open { display: block; }
+      .node-editor label {
+        display: block;
+        font-size: 10px;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+        color: var(--ink-faint);
+        margin: 2px 0 4px;
+      }
+      .node-editor input[type="text"], .node-editor textarea {
+        width: 100%;
+        background: var(--panel-2);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        color: var(--ink);
+        font: inherit;
+        font-size: 13px;
+        padding: 7px 8px;
+        outline: none;
+        -webkit-user-select: text;
+        user-select: text;
+        resize: vertical;
+      }
+      .node-editor textarea { min-height: 52px; margin-bottom: 4px; }
+      .node-editor input[type="text"] { margin-bottom: 8px; }
+      .node-editor input:focus, .node-editor textarea:focus { border-color: var(--accent); }
+      .node-editor .row { display: flex; gap: 6px; justify-content: flex-end; margin-top: 8px; }
+      .node-editor button {
+        appearance: none;
+        border: 1px solid var(--line);
+        background: var(--panel-2);
+        color: var(--ink);
+        font: inherit;
+        font-size: 12.5px;
+        padding: 6px 12px;
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      .node-editor button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+      .node-editor button.danger { color: var(--danger); margin-right: auto; }
 
       .text-editor {
         position: absolute;
@@ -212,6 +267,14 @@
     <div class="toolbar" role="toolbar" aria-label="Whiteboard tools">
 
       <div class="group" role="group" aria-label="Drawing tools">
+        <button class="tool" data-tool="select" title="Select / move — drag nodes to move them, drag from a node's round port to connect it to another node (V)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m4 3 7.5 18 2.2-7.3L21 11.5Z"/></svg>
+          <span class="lbl">Select</span>
+        </button>
+        <button class="tool" data-tool="node" title="Node — click the board to drop a node, then drag its ports to connect (N)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="13" height="10" rx="2"/><circle cx="16" cy="12" r="1.6" fill="currentColor" stroke="none"/><path d="M17.5 12H21"/></svg>
+          <span class="lbl">Node</span>
+        </button>
         <button class="tool active" data-tool="pen" title="Pen — pressure-sensitive (B)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
           <span class="lbl">Pen</span>
@@ -299,6 +362,10 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg>
           <span class="lbl">Redo</span>
         </button>
+        <button class="act" id="addNodeBtn" title="Add a node in the middle of the view — then drag from its round output port to another node's input port to connect them">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="13" height="10" rx="2"/><path d="M19 9v6M16 12h6"/></svg>
+          <span class="lbl">Add node</span>
+        </button>
         <button class="act" id="exportBtn" title="Download the board as a PNG image">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg>
           <span class="lbl">Export PNG</span>
@@ -314,11 +381,22 @@
     <div class="stage" id="stage">
       <canvas id="board"></canvas>
       <input class="text-editor" id="textEditor" type="text" placeholder="Type, then Enter" autocomplete="off" />
+      <div class="node-editor" id="nodeEditor" role="dialog" aria-label="Edit node">
+        <label for="nodeTitle">Title</label>
+        <input type="text" id="nodeTitle" autocomplete="off" />
+        <label for="nodeBody">Notes</label>
+        <textarea id="nodeBody"></textarea>
+        <div class="row">
+          <button type="button" class="danger" id="nodeDelete">Delete node</button>
+          <button type="button" class="primary" id="nodeDone">Done</button>
+        </div>
+      </div>
       <div class="empty-hint" id="emptyHint">
-        <div class="big">Pick up your pen and draw.</div>
+        <div class="big">Pick up your pen and draw — or wire up nodes.</div>
         <div class="small">
           Your Wacom works as-is — pressure, tilt and the eraser end are read straight from the browser.<br />
-          Rest your palm freely: touch is ignored while <em>Palm reject</em> is on.
+          Rest your palm freely: touch is ignored while <em>Palm reject</em> is on.<br />
+          Use <em>Add node</em> to drop nodes, then drag from a node's output port to another's input — the curves stay connected when you move things.
         </div>
       </div>
     </div>
@@ -339,7 +417,7 @@
       <span id="objCount">0 objects</span>
       <span id="cacheStatus" title="Your board is cached in this browser on this device, so it comes back after a reload">Local save on</span>
       <span class="shortcuts-hint">
-        <span class="kbd">B</span> pen · <span class="kbd">E</span> eraser · <span class="kbd">Ctrl Z</span> undo · <span class="kbd">Space</span>+drag pan · scroll to zoom
+        <span class="kbd">V</span> select · <span class="kbd">N</span> node · <span class="kbd">B</span> pen · drag a port to connect · <span class="kbd">Del</span> remove selected · <span class="kbd">Ctrl Z</span> undo · <span class="kbd">Space</span>+drag pan
       </span>
     </div>
 
@@ -374,6 +452,33 @@
         var erasedAny = false;
         var spaceDown = false;
         var rafPending = false;
+
+        /* ---------------- Nodes & connections ----------------
+           A node is a movable card { kind:"node", id, x, y, w, h, title, body, color }.
+           A connection is { kind:"connection", id, from, to, color } where
+           `from` is a node's output port (right side) and `to` is another
+           node's input port (left side). Endpoints are always derived from
+           the nodes' current positions, so curves follow nodes as they move. */
+        var selected = null;  // { type: "node" | "connection", id }
+        var nodeDrag = null;  // { node, dx, dy, before, moved }
+        var linking = null;   // { nodeId, side: "in" | "out", x, y } while dragging a wire
+        var idSeq = 0;
+        function nextId(prefix) {
+          idSeq += 1;
+          return prefix + "-" + Date.now().toString(36) + "-" + idSeq;
+        }
+        function findNode(id) {
+          for (var i = 0; i < state.objects.length; i++) {
+            var o = state.objects[i];
+            if (o.kind === "node" && o.id === id) return o;
+          }
+          return null;
+        }
+        function portPos(node, side) {
+          return side === "out"
+            ? { x: node.x + node.w, y: node.y + node.h / 2 }
+            : { x: node.x, y: node.y + node.h / 2 };
+        }
 
         var INK_FONT = '"Segoe Print","Bradley Hand","Comic Sans MS",cursive';
 
@@ -435,7 +540,11 @@
             var data = JSON.parse(raw);
             if (!data || !Array.isArray(data.objects)) return null;
             state.objects = cleanObjects(data.objects).filter(function (o) {
-              return o && (o.kind === "stroke" || o.kind === "rect" || o.kind === "ellipse" || o.kind === "line" || o.kind === "text");
+              return o && (o.kind === "stroke" || o.kind === "rect" || o.kind === "ellipse" || o.kind === "line" || o.kind === "text" || o.kind === "node" || o.kind === "connection");
+            });
+            // Drop connections whose nodes are gone (e.g. older cache)
+            state.objects = state.objects.filter(function (o) {
+              return o.kind !== "connection" || (findNode(o.from) && findNode(o.to));
             });
             if (data.cam && isFinite(data.cam.x) && isFinite(data.cam.y) && isFinite(data.cam.zoom)) {
               state.cam = {
@@ -490,8 +599,52 @@
           if (state.grid) drawGrid();
           ctx.translate(state.cam.x, state.cam.y);
           ctx.scale(state.cam.zoom, state.cam.zoom);
-          for (var i = 0; i < state.objects.length; i++) drawObject(ctx, state.objects[i]);
+          // Wires first, so nodes sit on top of the curves they carry
+          var i;
+          for (i = 0; i < state.objects.length; i++) {
+            if (state.objects[i].kind === "connection") drawObject(ctx, state.objects[i]);
+          }
+          for (i = 0; i < state.objects.length; i++) {
+            if (state.objects[i].kind !== "connection") drawObject(ctx, state.objects[i]);
+          }
           if (drawing) drawObject(ctx, drawing);
+          if (linking) drawTempWire(ctx);
+        }
+
+        /* Cubic bezier between two ports, ComfyUI-style: handles pull
+           horizontally out of each port. Returns the path on context c. */
+        function traceWire(c, x1, y1, x2, y2) {
+          var pull = Math.max(36, Math.abs(x2 - x1) * 0.45);
+          c.beginPath();
+          c.moveTo(x1, y1);
+          c.bezierCurveTo(x1 + pull, y1, x2 - pull, y2, x2, y2);
+        }
+        function wirePoint(x1, y1, x2, y2, t) {
+          var pull = Math.max(36, Math.abs(x2 - x1) * 0.45);
+          var cx1 = x1 + pull, cx2 = x2 - pull;
+          var u = 1 - t;
+          return {
+            x: u * u * u * x1 + 3 * u * u * t * cx1 + 3 * u * t * t * cx2 + t * t * t * x2,
+            y: u * u * u * y1 + 3 * u * u * t * y1 + 3 * u * t * t * y2 + t * t * t * y2
+          };
+        }
+        function drawTempWire(c) {
+          var node = findNode(linking.nodeId);
+          if (!node) return;
+          var p = portPos(node, linking.side);
+          c.save();
+          c.strokeStyle = "#ffb224";
+          c.lineWidth = 2.5 / state.cam.zoom + 1;
+          c.setLineDash([7, 5]);
+          if (linking.side === "out") traceWire(c, p.x, p.y, linking.x, linking.y);
+          else traceWire(c, linking.x, linking.y, p.x, p.y);
+          c.stroke();
+          c.setLineDash([]);
+          c.fillStyle = "#ffb224";
+          c.beginPath();
+          c.arc(linking.x, linking.y, 4.5, 0, Math.PI * 2);
+          c.fill();
+          c.restore();
         }
 
         function drawGrid() {
@@ -563,12 +716,120 @@
             c.font = obj.size + "px " + INK_FONT;
             c.textBaseline = "top";
             c.fillText(obj.text, obj.x, obj.y);
+          } else if (obj.kind === "connection") {
+            var a = findNode(obj.from), b = findNode(obj.to);
+            if (a && b) {
+              var p1 = portPos(a, "out"), p2 = portPos(b, "in");
+              var isSel = selected && selected.type === "connection" && selected.id === obj.id;
+              c.strokeStyle = isSel ? "#ffb224" : (obj.color || "#8a93a6");
+              c.globalAlpha = isSel ? 1 : 0.85;
+              c.lineWidth = isSel ? 4.5 : 3;
+              traceWire(c, p1.x, p1.y, p2.x, p2.y);
+              c.stroke();
+              // direction dot at the input end
+              c.fillStyle = c.strokeStyle;
+              c.beginPath();
+              c.arc(p2.x - 7, p2.y, 3, 0, Math.PI * 2);
+              c.fill();
+            }
+          } else if (obj.kind === "node") {
+            drawNode(c, obj);
+          }
+          c.restore();
+        }
+
+        function roundRectPath(c, x, y, w, h, r) {
+          r = Math.min(r, w / 2, h / 2);
+          c.beginPath();
+          c.moveTo(x + r, y);
+          c.arcTo(x + w, y, x + w, y + h, r);
+          c.arcTo(x + w, y + h, x, y + h, r);
+          c.arcTo(x, y + h, x, y, r);
+          c.arcTo(x, y, x + w, y, r);
+          c.closePath();
+        }
+        function drawNode(c, node) {
+          var isSel = selected && selected.type === "node" && selected.id === node.id;
+          var headerH = 30;
+          c.save();
+          // body
+          roundRectPath(c, node.x, node.y, node.w, node.h, 10);
+          c.fillStyle = state.boardDark ? "#232733" : "#ffffff";
+          c.fill();
+          c.lineWidth = isSel ? 2.5 : 1.5;
+          c.strokeStyle = isSel ? "#ffb224" : (state.boardDark ? "#454e63" : "#b9bcc4");
+          c.stroke();
+          // header band (clipped to the card outline)
+          c.save();
+          roundRectPath(c, node.x, node.y, node.w, node.h, 10);
+          c.clip();
+          c.fillStyle = node.color || "#4dabf7";
+          c.globalAlpha = state.boardDark ? 0.85 : 0.9;
+          c.fillRect(node.x, node.y, node.w, headerH);
+          c.globalAlpha = 1;
+          c.restore();
+          // title
+          c.fillStyle = "#14161c";
+          c.font = "600 13px ui-sans-system,-apple-system,'Segoe UI',Roboto,sans-serif";
+          c.textBaseline = "middle";
+          var title = node.title || "Node";
+          var maxTitle = node.w - 20;
+          while (title.length > 1 && c.measureText(title).width > maxTitle) title = title.slice(0, -1);
+          if (title !== (node.title || "Node")) title = title.slice(0, -1) + "…";
+          c.fillText(title, node.x + 10, node.y + headerH / 2 + 0.5);
+          // body text, wrapped to the card width
+          if (node.body) {
+            c.fillStyle = state.boardDark ? "#c6ccd9" : "#3c4150";
+            c.font = "12px ui-sans-system,-apple-system,'Segoe UI',Roboto,sans-serif";
+            c.textBaseline = "top";
+            var words = String(node.body).split(/\s+/);
+            var line = "", ly = node.y + headerH + 9, maxLines = Math.floor((node.h - headerH - 12) / 16);
+            var lines = 0;
+            for (var wi = 0; wi < words.length && lines < maxLines; wi++) {
+              var test = line ? line + " " + words[wi] : words[wi];
+              if (c.measureText(test).width > node.w - 18 && line) {
+                c.fillText(line, node.x + 10, ly);
+                ly += 16; lines++;
+                line = words[wi];
+              } else line = test;
+            }
+            if (line && lines < maxLines) c.fillText(line, node.x + 10, ly);
+          }
+          // port labels
+          c.fillStyle = state.boardDark ? "#79839a" : "#8a8f9c";
+          c.font = "9.5px ui-sans-system,-apple-system,'Segoe UI',Roboto,sans-serif";
+          c.textBaseline = "middle";
+          c.fillText("in", node.x + 9, node.y + node.h / 2);
+          var outW = c.measureText("out").width;
+          c.fillText("out", node.x + node.w - 9 - outW, node.y + node.h / 2);
+          // ports — input left, output right
+          var pin = portPos(node, "in"), pout = portPos(node, "out");
+          var ports = [
+            { p: pin, fill: state.boardDark ? "#232733" : "#ffffff" },
+            { p: pout, fill: node.color || "#4dabf7" }
+          ];
+          for (var pi = 0; pi < ports.length; pi++) {
+            c.beginPath();
+            c.arc(ports[pi].p.x, ports[pi].p.y, 6.5, 0, Math.PI * 2);
+            c.fillStyle = ports[pi].fill;
+            c.fill();
+            c.lineWidth = 2.5;
+            c.strokeStyle = node.color || "#4dabf7";
+            c.stroke();
           }
           c.restore();
         }
 
         /* ---------------- History ---------------- */
-        function snapshot() { return state.objects.slice(); }
+        function snapshot() {
+          // Shallow-copy each object: nodes get dragged (x/y mutated), so a
+          // plain slice() would let a drag rewrite history snapshots too.
+          return state.objects.map(function (o) {
+            var c = {};
+            for (var k in o) c[k] = o[k];
+            return c;
+          });
+        }
         function commitHistory(before) {
           state.undoStack.push(before);
           if (state.undoStack.length > 90) state.undoStack.shift();
@@ -596,6 +857,47 @@
           syncHistoryUI(); scheduleDraw(); scheduleSaveCache();
         }
 
+        /* ---------------- Node / connection hit tests ---------------- */
+        function portAt(p) {
+          var r = 13 / state.cam.zoom + 4;
+          // topmost node first (later in the list = drawn on top)
+          for (var i = state.objects.length - 1; i >= 0; i--) {
+            var o = state.objects[i];
+            if (o.kind !== "node") continue;
+            var sides = ["out", "in"];
+            for (var s = 0; s < sides.length; s++) {
+              var pp = portPos(o, sides[s]);
+              var dx = pp.x - p.x, dy = pp.y - p.y;
+              if (Math.sqrt(dx * dx + dy * dy) <= r) return { node: o, side: sides[s] };
+            }
+          }
+          return null;
+        }
+        function nodeAt(p) {
+          for (var i = state.objects.length - 1; i >= 0; i--) {
+            var o = state.objects[i];
+            if (o.kind !== "node") continue;
+            if (p.x >= o.x && p.x <= o.x + o.w && p.y >= o.y && p.y <= o.y + o.h) return o;
+          }
+          return null;
+        }
+        function connectionAt(p) {
+          var tol = 9 / state.cam.zoom + 2;
+          for (var i = state.objects.length - 1; i >= 0; i--) {
+            var o = state.objects[i];
+            if (o.kind !== "connection") continue;
+            var a = findNode(o.from), b = findNode(o.to);
+            if (!a || !b) continue;
+            var p1 = portPos(a, "out"), p2 = portPos(b, "in");
+            for (var s = 0; s <= 20; s++) {
+              var wp = wirePoint(p1.x, p1.y, p2.x, p2.y, s / 20);
+              var dx = wp.x - p.x, dy = wp.y - p.y;
+              if (Math.sqrt(dx * dx + dy * dy) <= tol) return o;
+            }
+          }
+          return null;
+        }
+
         /* ---------------- Eraser hit test ---------------- */
         function segDist(px, py, ax, ay, bx, by) {
           var dx = bx - ax, dy = by - ay;
@@ -607,6 +909,13 @@
         }
         function objectHit(obj, p, radius) {
           var i;
+          if (obj.kind === "node") {
+            return p.x >= obj.x - radius && p.x <= obj.x + obj.w + radius &&
+                   p.y >= obj.y - radius && p.y <= obj.y + obj.h + radius;
+          }
+          if (obj.kind === "connection") {
+            return connectionAt(p) === obj;
+          }
           if (obj.kind === "stroke") {
             if (obj.pts.length === 1) {
               var dx = obj.pts[0].x - p.x, dy = obj.pts[0].y - p.y;
@@ -645,16 +954,77 @@
           var radius = (state.size * 2.2) / 1; // world units
           var kept = [];
           var removed = false;
+          var removedNodeIds = {};
           for (var i = 0; i < state.objects.length; i++) {
-            if (objectHit(state.objects[i], p, radius)) removed = true;
-            else kept.push(state.objects[i]);
+            var o = state.objects[i];
+            if (objectHit(o, p, radius)) {
+              removed = true;
+              if (o.kind === "node") removedNodeIds[o.id] = true;
+              if (selected && selected.id === o.id) selected = null;
+            } else kept.push(o);
           }
           if (removed) {
-            state.objects = kept;
+            // Wires attached to an erased node go with it
+            state.objects = kept.filter(function (o) {
+              return o.kind !== "connection" || !(removedNodeIds[o.from] || removedNodeIds[o.to]);
+            });
             erasedAny = true;
             syncHistoryUI();
             scheduleDraw();
           }
+        }
+
+        /* ---------------- Node / connection actions ---------------- */
+        var nodeCount = 0;
+        function createNode(wx, wy, title, body) {
+          nodeCount += 1;
+          var node = {
+            kind: "node",
+            id: nextId("node"),
+            x: wx - 98, y: wy - 52,
+            w: 196, h: 104,
+            title: title || ("Node " + nodeCount),
+            body: body || "",
+            color: state.color
+          };
+          var before = snapshot();
+          state.objects.push(node);
+          selected = { type: "node", id: node.id };
+          commitHistory(before);
+          syncHistoryUI();
+          scheduleDraw();
+          return node;
+        }
+        function addConnection(fromId, toId) {
+          if (fromId === toId) return false;
+          for (var i = 0; i < state.objects.length; i++) {
+            var o = state.objects[i];
+            if (o.kind === "connection" && o.from === fromId && o.to === toId) return false; // already wired
+          }
+          var before = snapshot();
+          var link = { kind: "connection", id: nextId("link"), from: fromId, to: toId, color: state.color };
+          state.objects.push(link);
+          selected = { type: "connection", id: link.id };
+          commitHistory(before);
+          syncHistoryUI();
+          scheduleDraw();
+          return true;
+        }
+        function deleteSelected() {
+          if (!selected) return;
+          var before = snapshot();
+          var selId = selected.id, selType = selected.type;
+          state.objects = state.objects.filter(function (o) { return o.id !== selId; });
+          if (selType === "node") {
+            state.objects = state.objects.filter(function (o) {
+              return o.kind !== "connection" || (o.from !== selId && o.to !== selId);
+            });
+          }
+          selected = null;
+          closeNodeEditor();
+          commitHistory(before);
+          syncHistoryUI();
+          scheduleDraw();
         }
 
         /* ---------------- Pen telemetry ---------------- */
@@ -699,6 +1069,47 @@
             return;
           }
           if (e.button !== 0 && !isEraserEnd(e)) return;
+
+          // Nodes & wires: ports start a connection drag, nodes drag to
+          // move (their wires follow), empty space pans in Select mode.
+          if ((state.tool === "select" || state.tool === "node") && !isEraserEnd(e)) {
+            var hitPort = portAt(w);
+            if (hitPort) {
+              linking = { nodeId: hitPort.node.id, side: hitPort.side, x: w.x, y: w.y };
+              selected = { type: "node", id: hitPort.node.id };
+              scheduleDraw();
+              return;
+            }
+            if (state.tool === "node") {
+              var fresh = createNode(w.x, w.y);
+              nodeDrag = { node: fresh, dx: w.x - fresh.x, dy: w.y - fresh.y, before: null, moved: false };
+              return;
+            }
+            var hitNode = nodeAt(w);
+            if (hitNode) {
+              selected = { type: "node", id: hitNode.id };
+              var idx = state.objects.indexOf(hitNode);
+              if (idx >= 0 && idx !== state.objects.length - 1) {
+                state.objects.splice(idx, 1);
+                state.objects.push(hitNode); // raise above older cards
+              }
+              nodeDrag = { node: hitNode, dx: w.x - hitNode.x, dy: w.y - hitNode.y, before: snapshot(), moved: false };
+              scheduleDraw();
+              return;
+            }
+            var hitLink = connectionAt(w);
+            if (hitLink) {
+              selected = { type: "connection", id: hitLink.id };
+              scheduleDraw();
+              return;
+            }
+            selected = null;
+            closeNodeEditor();
+            panning = { sx: pos.sx, sy: pos.sy, camX: state.cam.x, camY: state.cam.y };
+            scheduleDraw();
+            return;
+          }
+
           if (state.palmReject && e.pointerType === "touch") return; // palm / finger rest
 
           var tool = isEraserEnd(e) ? "eraser" : state.tool;
@@ -733,6 +1144,21 @@
             scheduleDraw();
             return;
           }
+          var mw = toWorld(pos.sx, pos.sy);
+          if (linking) {
+            linking.x = mw.x;
+            linking.y = mw.y;
+            scheduleDraw();
+            return;
+          }
+          if (nodeDrag) {
+            var nx = mw.x - nodeDrag.dx, ny = mw.y - nodeDrag.dy;
+            if (Math.abs(nx - nodeDrag.node.x) > 0.01 || Math.abs(ny - nodeDrag.node.y) > 0.01) nodeDrag.moved = true;
+            nodeDrag.node.x = nx;
+            nodeDrag.node.y = ny;
+            scheduleDraw();
+            return;
+          }
           if (!drawing) return;
           var events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
           if (!events.length) events = [e];
@@ -758,6 +1184,26 @@
 
         function endPointer(e) {
           delete activePointers[e.pointerId];
+          if (linking) {
+            var lpos = evtPos(e);
+            var lw = toWorld(lpos.sx, lpos.sy);
+            var target = e.type === "pointerup" ? portAt(lw) : null;
+            if (target && target.node.id !== linking.nodeId && target.side !== linking.side) {
+              if (linking.side === "out") addConnection(linking.nodeId, target.node.id);
+              else addConnection(target.node.id, linking.nodeId);
+            }
+            linking = null;
+            scheduleDraw();
+            return;
+          }
+          if (nodeDrag) {
+            var nd = nodeDrag;
+            nodeDrag = null;
+            if (nd.moved && nd.before) commitHistory(nd.before);
+            else if (nd.moved) scheduleSaveCache();
+            scheduleDraw();
+            return;
+          }
           if (panning) { panning = null; scheduleSaveCache(); return; }
           if (!drawing) return;
           var d = drawing;
@@ -840,6 +1286,72 @@
         });
         textEditor.addEventListener("blur", commitText);
 
+        /* ---------------- Node editor ---------------- */
+        var nodeEditor = document.getElementById("nodeEditor");
+        var nodeTitleInput = document.getElementById("nodeTitle");
+        var nodeBodyInput = document.getElementById("nodeBody");
+        var editingNode = null;
+        var editingBefore = null;
+
+        function openNodeEditor(node) {
+          editingNode = node;
+          editingBefore = snapshot();
+          nodeTitleInput.value = node.title || "";
+          nodeBodyInput.value = node.body || "";
+          var s = toScreen(node.x, node.y + node.h);
+          var left = Math.max(8, Math.min(s.x, W - 248));
+          var top = s.y + 10;
+          if (top + 210 > H) top = Math.max(8, toScreen(node.x, node.y).y - 220);
+          nodeEditor.style.left = left + "px";
+          nodeEditor.style.top = top + "px";
+          nodeEditor.classList.add("open");
+          setTimeout(function () { nodeTitleInput.focus(); nodeTitleInput.select(); }, 0);
+        }
+        function closeNodeEditor(commit) {
+          if (!editingNode) { nodeEditor.classList.remove("open"); return; }
+          if (commit !== false) {
+            var t = nodeTitleInput.value.trim();
+            var b = nodeBodyInput.value;
+            if (t !== (editingNode.title || "") || b !== (editingNode.body || "")) {
+              editingNode.title = t || "Node";
+              editingNode.body = b;
+              if (editingBefore) commitHistory(editingBefore);
+            }
+          }
+          editingNode = null;
+          editingBefore = null;
+          nodeEditor.classList.remove("open");
+          scheduleDraw();
+        }
+        document.getElementById("nodeDone").addEventListener("click", function () { closeNodeEditor(true); });
+        document.getElementById("nodeDelete").addEventListener("click", function () {
+          var n = editingNode;
+          editingNode = null;
+          editingBefore = null;
+          nodeEditor.classList.remove("open");
+          if (n) { selected = { type: "node", id: n.id }; deleteSelected(); }
+        });
+        [nodeTitleInput, nodeBodyInput].forEach(function (el) {
+          el.addEventListener("keydown", function (e) {
+            e.stopPropagation();
+            if (e.key === "Enter" && el === nodeTitleInput) { e.preventDefault(); closeNodeEditor(true); }
+            if (e.key === "Escape") closeNodeEditor(false);
+          });
+          el.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
+        });
+
+        canvas.addEventListener("dblclick", function (e) {
+          if (state.tool !== "select" && state.tool !== "node") return;
+          var pos = evtPos(e);
+          var w = toWorld(pos.sx, pos.sy);
+          var node = nodeAt(w);
+          if (node) {
+            selected = { type: "node", id: node.id };
+            openNodeEditor(node);
+            scheduleDraw();
+          }
+        });
+
         /* ---------------- Export PNG ---------------- */
         function exportPNG() {
           var pad = 40;
@@ -849,6 +1361,14 @@
             var i;
             if (o.kind === "stroke") for (i = 0; i < o.pts.length; i++) grow(o.pts[i].x, o.pts[i].y);
             else if (o.kind === "text") { grow(o.x, o.y); grow(o.x + o.text.length * o.size * 0.62, o.y + o.size * 1.3); }
+            else if (o.kind === "node") { grow(o.x - 10, o.y); grow(o.x + o.w + 10, o.y + o.h); }
+            else if (o.kind === "connection") {
+              var a = findNode(o.from), b = findNode(o.to);
+              if (a && b) {
+                var p1 = portPos(a, "out"), p2 = portPos(b, "in");
+                for (i = 0; i <= 12; i++) { var wp = wirePoint(p1.x, p1.y, p2.x, p2.y, i / 12); grow(wp.x, wp.y); }
+              }
+            }
             else { grow(Math.min(o.x, o.x + o.w), Math.min(o.y, o.y + o.h)); grow(Math.max(o.x, o.x + o.w), Math.max(o.y, o.y + o.h)); }
           });
           if (!isFinite(minX)) { var tl = toWorld(0, 0), br = toWorld(W, H); minX = tl.x; minY = tl.y; maxX = br.x; maxY = br.y; }
@@ -863,7 +1383,8 @@
           c.fillRect(0, 0, out.width, out.height);
           c.translate(-minX * scale, -minY * scale);
           c.scale(scale, scale);
-          state.objects.forEach(function (o) { drawObject(c, o); });
+          state.objects.forEach(function (o) { if (o.kind === "connection") drawObject(c, o); });
+          state.objects.forEach(function (o) { if (o.kind !== "connection") drawObject(c, o); });
           var a = document.createElement("a");
           a.download = "whiteboard.png";
           a.href = out.toDataURL("image/png");
@@ -873,13 +1394,13 @@
         }
 
         /* ---------------- Toolbar wiring ---------------- */
-        var cursorFor = { pen: "crosshair", marker: "crosshair", eraser: "cell", line: "crosshair", rect: "crosshair", ellipse: "crosshair", text: "text", hand: "grab" };
+        var cursorFor = { select: "default", node: "copy", pen: "crosshair", marker: "crosshair", eraser: "cell", line: "crosshair", rect: "crosshair", ellipse: "crosshair", text: "text", hand: "grab" };
         function setTool(t) {
           state.tool = t;
           document.querySelectorAll("button.tool").forEach(function (b) {
             b.classList.toggle("active", b.dataset.tool === t);
           });
-          canvas.className = t === "hand" ? "hand" : (t === "text" ? "text" : (t === "eraser" ? "erasing" : ""));
+          canvas.className = t === "hand" ? "hand" : (t === "text" ? "text" : (t === "eraser" ? "erasing" : (t === "select" ? "select" : (t === "node" ? "node" : ""))));
           canvas.style.cursor = cursorFor[t] || "crosshair";
         }
         document.querySelectorAll("button.tool").forEach(function (b) {
@@ -944,6 +1465,13 @@
 
         document.getElementById("undoBtn").addEventListener("click", undo);
         document.getElementById("redoBtn").addEventListener("click", redo);
+        document.getElementById("addNodeBtn").addEventListener("click", function () {
+          var c = toWorld(W / 2, H / 2);
+          // Cascade slightly so repeated clicks don't stack exactly
+          var off = (nodeCount % 5) * 26;
+          createNode(c.x + off, c.y + off);
+          setTool("select");
+        });
         document.getElementById("exportBtn").addEventListener("click", exportPNG);
         document.getElementById("zoomIn").addEventListener("click", function () { setZoom(state.cam.zoom * 1.2, W / 2, H / 2, toWorld(W / 2, H / 2)); });
         document.getElementById("zoomOut").addEventListener("click", function () { setZoom(state.cam.zoom / 1.2, W / 2, H / 2, toWorld(W / 2, H / 2)); });
@@ -972,6 +1500,8 @@
           if (!state.objects.length) return;
           var before = snapshot();
           state.objects = [];
+          selected = null;
+          closeNodeEditor(false);
           commitHistory(before);
           syncHistoryUI();
           scheduleDraw();
@@ -984,6 +1514,12 @@
           if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
           if (mod && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); return; }
           if (mod || e.altKey) return;
+          if ((e.key === "Delete" || e.key === "Backspace") && selected && !editingNode) {
+            e.preventDefault();
+            deleteSelected();
+            return;
+          }
+          if (e.key === "Escape" && selected) { selected = null; scheduleDraw(); return; }
           switch (e.key) {
             case " ": spaceDown = true; canvas.classList.add("hand"); e.preventDefault(); break;
             case "b": case "B": setTool("pen"); break;
@@ -993,7 +1529,9 @@
             case "r": case "R": setTool("rect"); break;
             case "o": case "O": setTool("ellipse"); break;
             case "t": case "T": setTool("text"); break;
-            case "v": case "V": setTool("hand"); break;
+            case "v": case "V": setTool("select"); break;
+            case "n": case "N": setTool("node"); break;
+            case "g": case "G": setTool("hand"); break;
           }
         });
         document.addEventListener("keyup", function (e) {
@@ -1022,6 +1560,40 @@
 
         syncHistoryUI();
         resize();
+
+        /* First run only (nothing restored): seed a tiny wired example so
+           the node system is visible straight away. It's a normal board —
+           drag the cards, rewire them, or Clear to start blank. */
+        if (!restored && state.objects.length === 0) {
+          var wide = W >= 720;
+          var cx = W / 2, cy = H / 2;
+          function seedNode(title, body, color, wx, wy) {
+            var n = {
+              kind: "node", id: nextId("node"),
+              x: wx - 98, y: wy - 52, w: 196, h: 104,
+              title: title, body: body, color: color
+            };
+            state.objects.push(n);
+            return n;
+          }
+          var s1, s2, s3;
+          if (wide) {
+            s1 = seedNode("Input", "Start here — drag me around, my wire follows.", "#4dabf7", cx - 290, cy);
+            s2 = seedNode("Process", "Drag from a round output port to another node's input to rewire.", "#9775fa", cx, cy);
+            s3 = seedNode("Output", "Double-click any node to edit its text.", "#69db7c", cx + 290, cy);
+          } else {
+            s1 = seedNode("Input", "Start here — drag me around, my wire follows.", "#4dabf7", cx, cy - 170);
+            s2 = seedNode("Process", "Drag from a round output port to another node's input to rewire.", "#9775fa", cx, cy);
+            s3 = seedNode("Output", "Double-click any node to edit its text.", "#69db7c", cx, cy + 170);
+          }
+          state.objects.push({ kind: "connection", id: nextId("link"), from: s1.id, to: s2.id, color: "#4dabf7" });
+          state.objects.push({ kind: "connection", id: nextId("link"), from: s2.id, to: s3.id, color: "#9775fa" });
+          nodeCount = 3;
+          selected = null;
+          syncHistoryUI();
+          scheduleDraw();
+          scheduleSaveCache();
+        }
       })();
     </script>
   </body>
