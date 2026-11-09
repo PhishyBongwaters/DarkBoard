@@ -267,7 +267,7 @@
     <div class="toolbar" role="toolbar" aria-label="Whiteboard tools">
 
       <div class="group" role="group" aria-label="Drawing tools">
-        <button class="tool" data-tool="select" title="Select / move — drag nodes to move them, drag from a node's round port to connect it to another node (V)">
+        <button class="tool" data-tool="select" title="Select / move — drag nodes to move them, drag a node's corner or edges to resize it, drag from a round port to connect it (V)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m4 3 7.5 18 2.2-7.3L21 11.5Z"/></svg>
           <span class="lbl">Select</span>
         </button>
@@ -396,7 +396,7 @@
         <div class="small">
           Your Wacom works as-is — pressure, tilt and the eraser end are read straight from the browser.<br />
           Rest your palm freely: touch is ignored while <em>Palm reject</em> is on.<br />
-          Use <em>Add node</em> to drop nodes, then drag from a node's output port to another's input — the curves stay connected when you move things.
+          Use <em>Add node</em> to drop nodes, then drag from a node's output port to another's input — the curves stay connected when you move things. Drag a node's bottom-right corner (or its right / bottom edges) to resize it.
         </div>
       </div>
     </div>
@@ -417,7 +417,7 @@
       <span id="objCount">0 objects</span>
       <span id="cacheStatus" title="Your board is cached in this browser on this device, so it comes back after a reload">Local save on</span>
       <span class="shortcuts-hint">
-        <span class="kbd">V</span> select · <span class="kbd">N</span> node · <span class="kbd">B</span> pen · drag a port to connect · <span class="kbd">Del</span> remove selected · <span class="kbd">Ctrl Z</span> undo · <span class="kbd">Space</span>+drag pan
+        <span class="kbd">V</span> select · <span class="kbd">N</span> node · <span class="kbd">B</span> pen · drag a port to connect · drag corner to resize · <span class="kbd">Del</span> remove selected · <span class="kbd">Ctrl Z</span> undo · <span class="kbd">Space</span>+drag pan
       </span>
     </div>
 
@@ -461,7 +461,9 @@
            the nodes' current positions, so curves follow nodes as they move. */
         var selected = null;  // { type: "node" | "connection", id }
         var nodeDrag = null;  // { node, dx, dy, before, moved }
+        var nodeResize = null; // { node, mode, startX, startY, startW, startH, before, moved }
         var linking = null;   // { nodeId, side: "in" | "out", x, y } while dragging a wire
+        var NODE_MIN_W = 132, NODE_MIN_H = 68, NODE_MAX_W = 900, NODE_MAX_H = 700;
         var idSeq = 0;
         function nextId(prefix) {
           idSeq += 1;
@@ -545,6 +547,13 @@
             // Drop connections whose nodes are gone (e.g. older cache)
             state.objects = state.objects.filter(function (o) {
               return o.kind !== "connection" || (findNode(o.from) && findNode(o.to));
+            });
+            // Normalise node sizes (older caches / hand-edited saves)
+            state.objects.forEach(function (o) {
+              if (o.kind !== "node") return;
+              var w = isFinite(o.w) ? o.w : 196, h = isFinite(o.h) ? o.h : 104;
+              o.w = Math.max(NODE_MIN_W, Math.min(NODE_MAX_W, w));
+              o.h = Math.max(NODE_MIN_H, Math.min(NODE_MAX_H, h));
             });
             if (data.cam && isFinite(data.cam.x) && isFinite(data.cam.y) && isFinite(data.cam.zoom)) {
               state.cam = {
@@ -817,6 +826,35 @@
             c.strokeStyle = node.color || "#4dabf7";
             c.stroke();
           }
+          // resize grip — bottom-right corner (drag corner / right edge / bottom edge)
+          var grip = 15;
+          var gx = node.x + node.w - grip - 3, gy = node.y + node.h - grip - 3;
+          c.save();
+          roundRectPath(c, gx, gy, grip, grip, 4);
+          c.fillStyle = isSel ? "#ffb224" : (state.boardDark ? "#3a4155" : "#d4d7de");
+          c.globalAlpha = isSel ? 1 : 0.92;
+          c.fill();
+          c.globalAlpha = 1;
+          c.strokeStyle = isSel ? "#ffb224" : (state.boardDark ? "#5a647c" : "#aeb3bf");
+          c.lineWidth = 1;
+          c.stroke();
+          c.strokeStyle = isSel ? "#1a1405" : (state.boardDark ? "#aeb8cc" : "#6b7280");
+          c.lineWidth = 1.4;
+          c.beginPath();
+          c.moveTo(gx + 4, gy + grip - 4);
+          c.lineTo(gx + grip - 4, gy + 4);
+          c.moveTo(gx + 8, gy + grip - 4);
+          c.lineTo(gx + grip - 4, gy + 8);
+          c.stroke();
+          // subtle edge ticks when selected, hinting the edges drag too
+          if (isSel) {
+            c.fillStyle = "#ffb224";
+            c.beginPath();
+            c.arc(node.x + node.w, node.y + node.h / 2, 3, 0, Math.PI * 2);
+            c.arc(node.x + node.w / 2, node.y + node.h, 3, 0, Math.PI * 2);
+            c.fill();
+          }
+          c.restore();
           c.restore();
         }
 
@@ -880,6 +918,36 @@
             if (p.x >= o.x && p.x <= o.x + o.w && p.y >= o.y && p.y <= o.y + o.h) return o;
           }
           return null;
+        }
+        // Hit-test a node's resize zones: corner resizes both axes, the
+        // right edge resizes width only, the bottom edge height only.
+        // Tolerances are in world units and grow when zoomed out so the
+        // grip stays grabbable. Returns { node, mode } or null.
+        function resizeAt(p) {
+          var tol = 11 / state.cam.zoom + 5;
+          var cornerTol = 15 / state.cam.zoom + 6;
+          for (var i = state.objects.length - 1; i >= 0; i--) {
+            var o = state.objects[i];
+            if (o.kind !== "node") continue;
+            var right = o.x + o.w, bottom = o.y + o.h;
+            if (Math.abs(p.x - right) <= cornerTol && Math.abs(p.y - bottom) <= cornerTol &&
+                p.x >= o.x + o.w / 2 && p.y >= o.y + o.h / 2) {
+              return { node: o, mode: "corner" };
+            }
+            if (Math.abs(p.x - right) <= tol && p.y >= o.y + 14 && p.y <= o.y + o.h - 14) {
+              return { node: o, mode: "right" };
+            }
+            if (Math.abs(p.y - bottom) <= tol && p.x >= o.x + 14 && p.x <= o.x + o.w - 14) {
+              return { node: o, mode: "bottom" };
+            }
+          }
+          return null;
+        }
+        function clampNodeSize(w, h) {
+          return {
+            w: Math.max(NODE_MIN_W, Math.min(NODE_MAX_W, w)),
+            h: Math.max(NODE_MIN_H, Math.min(NODE_MAX_H, h))
+          };
         }
         function connectionAt(p) {
           var tol = 9 / state.cam.zoom + 2;
@@ -1080,6 +1148,24 @@
               scheduleDraw();
               return;
             }
+            var hitResize = resizeAt(w);
+            if (hitResize) {
+              selected = { type: "node", id: hitResize.node.id };
+              var rIdx = state.objects.indexOf(hitResize.node);
+              if (rIdx >= 0 && rIdx !== state.objects.length - 1) {
+                state.objects.splice(rIdx, 1);
+                state.objects.push(hitResize.node);
+              }
+              nodeResize = {
+                node: hitResize.node, mode: hitResize.mode,
+                startX: w.x, startY: w.y,
+                startW: hitResize.node.w, startH: hitResize.node.h,
+                before: snapshot(), moved: false
+              };
+              canvas.style.cursor = hitResize.mode === "corner" ? "nwse-resize" : (hitResize.mode === "right" ? "ew-resize" : "ns-resize");
+              scheduleDraw();
+              return;
+            }
             if (state.tool === "node") {
               var fresh = createNode(w.x, w.y);
               nodeDrag = { node: fresh, dx: w.x - fresh.x, dy: w.y - fresh.y, before: null, moved: false };
@@ -1151,6 +1237,31 @@
             scheduleDraw();
             return;
           }
+          if (nodeResize) {
+            var rdx = mw.x - nodeResize.startX, rdy = mw.y - nodeResize.startY;
+            var wantW = nodeResize.mode === "bottom" ? nodeResize.startW : nodeResize.startW + rdx;
+            var wantH = nodeResize.mode === "right" ? nodeResize.startH : nodeResize.startH + rdy;
+            var clamped = clampNodeSize(wantW, wantH);
+            if (Math.abs(clamped.w - nodeResize.node.w) > 0.01 || Math.abs(clamped.h - nodeResize.node.h) > 0.01) nodeResize.moved = true;
+            nodeResize.node.w = clamped.w;
+            nodeResize.node.h = clamped.h;
+            scheduleDraw();
+            return;
+          }
+          // Hover feedback in Select / Node mode: resize cursor over a
+          // grip or edge, grab over a node body, default elsewhere.
+          if (!drawing && !nodeDrag && (state.tool === "select" || state.tool === "node") && !spaceDown) {
+            var hoverResize = resizeAt(mw);
+            if (hoverResize) {
+              canvas.style.cursor = hoverResize.mode === "corner" ? "nwse-resize" : (hoverResize.mode === "right" ? "ew-resize" : "ns-resize");
+            } else if (portAt(mw)) {
+              canvas.style.cursor = "crosshair";
+            } else if (nodeAt(mw)) {
+              canvas.style.cursor = "grab";
+            } else {
+              canvas.style.cursor = state.tool === "node" ? "copy" : "default";
+            }
+          }
           if (nodeDrag) {
             var nx = mw.x - nodeDrag.dx, ny = mw.y - nodeDrag.dy;
             if (Math.abs(nx - nodeDrag.node.x) > 0.01 || Math.abs(ny - nodeDrag.node.y) > 0.01) nodeDrag.moved = true;
@@ -1193,6 +1304,15 @@
               else addConnection(target.node.id, linking.nodeId);
             }
             linking = null;
+            scheduleDraw();
+            return;
+          }
+          if (nodeResize) {
+            var nr = nodeResize;
+            nodeResize = null;
+            canvas.style.cursor = cursorFor[state.tool] || "crosshair";
+            if (nr.moved && nr.before) commitHistory(nr.before);
+            else if (nr.moved) scheduleSaveCache();
             scheduleDraw();
             return;
           }
